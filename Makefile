@@ -20,9 +20,8 @@ options:
 
 ${OBJ}: config.h config.mk
 
-config.h:
-	@echo creating $@ from config.def.h
-	@cp config.def.h $@
+config.h: config.h.erb
+	erb $< > $@ || rm -f $@
 
 dwm: ${OBJ}
 	@echo CC -o $@
@@ -46,6 +45,10 @@ install: all
 	@mkdir -p ${DESTDIR}${PREFIX}/bin
 	@cp -f dwm ${DESTDIR}${PREFIX}/bin
 	@chmod 755 ${DESTDIR}${PREFIX}/bin/dwm
+	@echo installing status bar to ${DESTDIR}${PREFIX}/bin
+	@cp -f dwm-statusbar ${DESTDIR}${PREFIX}/bin
+	@cp -Rf dwm-statusbar-icons ${DESTDIR}${PREFIX}/bin
+	@chmod 755 ${DESTDIR}${PREFIX}/bin/dwm-statusbar
 	@echo installing manual page to ${DESTDIR}${MANPREFIX}/man1
 	@mkdir -p ${DESTDIR}${MANPREFIX}/man1
 	@sed "s/VERSION/${VERSION}/g" < dwm.1 > ${DESTDIR}${MANPREFIX}/man1/dwm.1
@@ -54,6 +57,9 @@ install: all
 uninstall:
 	@echo removing executable file from ${DESTDIR}${PREFIX}/bin
 	@rm -f ${DESTDIR}${PREFIX}/bin/dwm
+	@echo removing status bar from ${DESTDIR}${PREFIX}/bin
+	@rm -f ${DESTDIR}${PREFIX}/bin/dwm-statusbar
+	@rm -rf ${DESTDIR}${PREFIX}/bin/dwm-statusbar-icons
 	@echo removing manual page from ${DESTDIR}${MANPREFIX}/man1
 	@rm -f ${DESTDIR}${MANPREFIX}/man1/dwm.1
 

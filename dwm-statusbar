@@ -1,0 +1,227 @@
+#!/usr/bin/env ruby
+# Statusbar using dzen2-svn and sm4tik's XBM icons:
+# http://koti.24.fi/sm4tik/shared/xbm8x8-0.1.tar.gz
+
+END {
+  ICONS_DIR = __FILE__ + '-icons'
+  TRUNCATE = 32
+  HEIGHT = 16
+  FONT = '-*-tamzen-medium-r-*-*-14-*-*-*-*-*-*-*'
+  TEXT_COLOR = '#dcdccc' # Zenburn Normal
+  BACK_COLOR = '#3f3f3f' # Zenburn Normal
+  ICON_COLOR = '#8cd0d3' # Zenburn Number
+
+  StatusBar.new [
+    Volume.new(mixer: 'Master'),
+    Music.new(refresh: 15),
+    Weather.new(refresh: 60*5, location: 'SJC'),
+    Loadavg.new(refresh: 15),
+    Memory.new,
+    Thermal.new,
+    Battery.new,
+    Clock.new(format: '%l:%M%P %a %m/%d'),
+  ]
+}
+
+#-----------------------------------------------------------------------------
+# implementation details
+#-----------------------------------------------------------------------------
+
+require 'thread'
+require 'shellwords'
+
+class StatusBar
+  UPDATES = Queue.new
+
+  def initialize barlets
+    IO.popen(Shellwords.join([
+      'dzen2', '-e', '-',
+      '-y', '-1', # bottom of screen
+      '-h', HEIGHT.to_s,
+      '-fn', FONT,
+      '-fg', TEXT_COLOR,
+      '-bg', BACK_COLOR,
+    ]), 'w') do |bar|
+
+      trap(:SIGUSR1){ barlets.each {|b| b.wakeup if b.alive? } }
+      label_by_barlet = Hash[barlets.map {|a| [a, nil] }]
+
+      while update = UPDATES.shift
+        barlet, (icon, *label, clicks) = update
+
+        unless clicks.kind_of? Hash
+          label << clicks
+          clicks = {}
+        end
+
+        label_by_barlet[barlet] = [
+          # also send signal to update all barlets when the user clicks
+          clicks.map {|btn,cmd| "^ca(#{btn},#{cmd};kill -USR1 #{$$})" },
+
+          label.compact.map {|s| s.length > TRUNCATE ? s[0,TRUNCATE-3]+'...' : s }.
+          unshift("^fg(#{ICON_COLOR})^i(#{ICONS_DIR}/#{icon}.xbm)^fg()").join(' '),
+
+          ['^ca()'] * clicks.length
+        ].join
+
+        bar.puts label_by_barlet.values.compact.join('  ')
+      end
+    end
+  end
+end
+
+class StatusBarlet < Thread
+  def initialize options={}
+    @options = { refresh: 30 }.merge(options)
+    super do
+      loop do
+        label = begin
+          self.label
+        rescue Exception => error
+          warn error.inspect
+          warn error.backtrace.join("\n")
+          self.class.name +': '+ error.class.name
+        end
+        StatusBar::UPDATES << [self, label]
+        sleep @options[:refresh]
+      end
+    end
+  end
+
+  def label
+    raise NotImplementedError
+  end
+
+protected
+
+  def fmtfloat float
+    sprintf('%.1f', float).sub('.0', '')
+  end
+end
+
+class Clock < StatusBarlet
+  def label
+    [:clock, Time.now.strftime(@options[:format]).squeeze(' ').strip, {
+      1 => "xterm -name DIALOG -e 'cal -3; read'",
+    }]
+  end
+end
+
+class Loadavg < StatusBarlet
+  def label
+    nsamples = @options[:samples] || 3
+    averages = File.read('/proc/loadavg').split.first(nsamples).map(&:to_f)
+    percents = averages.map {|a| fmtfloat(a * 100) + '%' }
+    [:cpu, *percents, {
+      1 => "xterm -name DIALOG -e top",
+    }]
+  end
+end
+
+class Battery < StatusBarlet
+  def label
+    device, status = `acpi -b`.chomp.split(/: */, 2)
+
+    status, level, time = status.split(/, */)
+    time = "<#{time[/[0:]*(\S+)/, 1]}" if time
+    icon = `acpi -a` =~ /on-line/ ? :ac : :bat_full_02
+
+    [icon, level, time]
+  end
+end
+
+class Thermal < StatusBarlet
+  def label
+    device, status = `acpi -t`.chomp.split(/: */, 2)
+
+    status, level = status.split(/, */)
+    level, _, unit = level.split
+    temperature = "#{fmtfloat level.to_f}#{unit}"
+
+    [:temp, temperature, (status if status != 'ok')]
+  end
+end
+
+class Memory < StatusBarlet
+  def label
+    status = `free -m`
+    total, used, free = status[/Mem:(.+)/, 1].split.map(&:to_f)
+    [:mem, "#{fmtfloat (used/total)*100}%", "<#{fmtfloat free/1024}G"]
+  end
+end
+
+class Volume < StatusBarlet
+  def label
+    status = `amixer get #{@options[:mixer]}`
+
+    level = status[/\d+%/]
+    state = status[/\[(on|off)\]/, 1]
+    label = state == 'on' ? level : state
+
+    [:spkr_01, label, {
+      1 => "xterm -name DIALOG -e alsamixer",
+      3 => "amixer -q set #{@options[:mixer]} toggle",
+      4 => "amixer -q set #{@options[:mixer]} 5%+",
+      5 => "amixer -q set #{@options[:mixer]} 5%-",
+    }]
+  end
+end
+
+class Weather < StatusBarlet
+  def label
+    unless defined? @barometer
+      gem 'barometer', '~> 0.7.3'
+      require 'barometer'
+      @barometer = Barometer.new(@options[:location])
+    end
+    weather = @barometer.measure
+
+    description = weather.current.icon#.tr('aeiou', '')
+    temperature = weather.temperature.to_s.sub(' ', '')
+
+    [:fs_01, temperature, description]
+  end
+end
+
+class Music < StatusBarlet
+  def label
+    unless defined? @mpd
+      gem 'librmpd', '~> 0.1'
+      require 'librmpd'
+      @mpd = MPD.new
+    end
+
+    unless @mpd.connected?
+      @mpd.connect
+      if password = @options[:password]
+        @mpd.password password
+      end
+    end
+
+    if @mpd.stopped?
+      icon = :stop
+      label = 'mpd'
+    else
+      song = @mpd.current_song
+      if title = song.title || (f = song.file and File.basename(f))
+        # infer artist from song title
+        if not artist = song.artist and title =~ /\s+-\s+/
+          artist, title = $`, $'
+        end
+
+        # remove parenthetical subtext
+        title = title.sub(/\s*\(.*/, '')
+      end
+
+      icon = @mpd.paused? ? :pause : :play
+      label = [title, artist].compact.join(' by ')
+    end
+
+    [icon, label, {
+      1 => 'mpc -q toggle',
+      3 => 'mpc -q stop',
+      4 => 'mpc -q prev',
+      5 => 'mpc -q next',
+    }]
+  end
+end
