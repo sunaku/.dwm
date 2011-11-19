@@ -720,6 +720,8 @@ drawbar(Monitor *m) {
 	int x;
 	unsigned int i, occ = 0, urg = 0;
 	unsigned long *col;
+	unsigned int a= 0, s= 0;
+	char posbuf[10];
 	Client *c;
 
 	for(c = m->clients; c; c = c->next) {
@@ -740,6 +742,18 @@ drawbar(Monitor *m) {
 	drawtext(m->ltsymbol, dc.norm, False);
 	dc.x += dc.w;
 	x = dc.x;
+	if(m->lt[m->sellt]->arrange == monocle){
+		for(c= nexttiled(m->clients), a= 0, s= 0; c; c= nexttiled(c->next), a++)
+			if(c == m->stack)
+				s= a;
+		if(!s && a)
+			s= a;
+		snprintf(posbuf, LENGTH(posbuf), "[%d/%d]", s, a);
+		dc.w= TEXTW(posbuf);
+		drawtext(posbuf, dc.norm, False);
+		x= dc.x + dc.w;
+	}
+	
 	if(m == selmon) { /* status is only drawn on selected monitor */
 		dc.w = TEXTW(stext);
 		dc.x = m->ww - dc.w;
@@ -1197,8 +1211,6 @@ monocle(Monitor *m) {
 	for(c = m->clients; c; c = c->next)
 		if(ISVISIBLE(c))
 			n++;
-	if(n > 0) /* override layout symbol */
-		snprintf(m->ltsymbol, sizeof m->ltsymbol, "[%d]", n);
 	for(c = nexttiled(m->clients); c; c = nexttiled(c->next))
 		resize(c, m->wx, m->wy, m->ww - 2 * c->bw, m->wh - 2 * c->bw, False);
 }
