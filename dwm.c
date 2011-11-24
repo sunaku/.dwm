@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <libgen.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <X11/cursorfont.h>
@@ -1661,12 +1663,38 @@ sigchld(int unused) {
 	while(0 < waitpid(-1, NULL, WNOHANG));
 }
 
+#define SPAWN_CWD_DELIM " []{}()<>\"':"
+
 void
 spawn(const Arg *arg) {
 	if(fork() == 0) {
 		if(dpy)
 			close(ConnectionNumber(dpy));
 		setsid();
+		if(selmon->sel) {
+			const char* const home = getenv("HOME");
+			const size_t homelen = strlen(home);
+			char *cwd, *tokbuf, *pathbuf = NULL;
+			struct stat statbuf;
+			if(!(tokbuf = malloc(strlen(selmon->sel->name) + 1)))
+				die("fatal: could not malloc() %u bytes\n", strlen(selmon->sel->name) + 1);
+			cwd = strtok(strcpy(tokbuf, selmon->sel->name), SPAWN_CWD_DELIM);
+			while(cwd) {
+				if(*cwd == '~') { /* replace ~ with $HOME */
+					if(pathbuf) free(pathbuf);
+					if(!(pathbuf = malloc(homelen + strlen(cwd)))) /* ~ counts NULL terminator */
+						die("fatal: could not malloc() %u bytes\n", homelen + strlen(cwd));
+					strcpy(strcpy(pathbuf, home) + homelen, cwd+1);
+					cwd = pathbuf;
+				}
+				if(strchr(cwd, '/') && !stat(cwd, &statbuf)) {
+					if(!S_ISDIR(statbuf.st_mode)) cwd = dirname(cwd);
+					if(!chdir(cwd)) break;
+				}
+				cwd = strtok(NULL, SPAWN_CWD_DELIM);
+			}
+			free(tokbuf); if(pathbuf) free(pathbuf);
+		}
 		execvp(((char **)arg->v)[0], (char **)arg->v);
 		fprintf(stderr, "dwm: execvp %s", ((char **)arg->v)[0]);
 		perror(" failed");
