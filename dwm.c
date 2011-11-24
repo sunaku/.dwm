@@ -1670,31 +1670,39 @@ spawn(const Arg *arg) {
 	if(fork() == 0) {
 		if(dpy)
 			close(ConnectionNumber(dpy));
-		setsid();
 		if(selmon->sel) {
 			const char* const home = getenv("HOME");
 			const size_t homelen = strlen(home);
 			char *cwd, *tokbuf, *pathbuf = NULL;
 			struct stat statbuf;
+
 			if(!(tokbuf = malloc(strlen(selmon->sel->name) + 1)))
 				die("fatal: could not malloc() %u bytes\n", strlen(selmon->sel->name) + 1);
+
 			cwd = strtok(strcpy(tokbuf, selmon->sel->name), SPAWN_CWD_DELIM);
 			while(cwd) {
 				if(*cwd == '~') { /* replace ~ with $HOME */
-					if(pathbuf) free(pathbuf);
-					if(!(pathbuf = malloc(homelen + strlen(cwd)))) /* ~ counts NULL terminator */
+					if(!(pathbuf = malloc(homelen + strlen(cwd)))) /* ~ counts for NULL term */
 						die("fatal: could not malloc() %u bytes\n", homelen + strlen(cwd));
-					strcpy(strcpy(pathbuf, home) + homelen, cwd+1);
+					strcpy(strcpy(pathbuf, home) + homelen, cwd + 1);
 					cwd = pathbuf;
 				}
+
 				if(strchr(cwd, '/') && !stat(cwd, &statbuf)) {
-					if(!S_ISDIR(statbuf.st_mode)) cwd = dirname(cwd);
-					if(!chdir(cwd)) break;
+					if(!S_ISDIR(statbuf.st_mode))
+						cwd = dirname(cwd);
+
+					if(!chdir(cwd))
+						break;
 				}
+
 				cwd = strtok(NULL, SPAWN_CWD_DELIM);
 			}
-			free(tokbuf); if(pathbuf) free(pathbuf);
+
+			free(tokbuf);
+			free(pathbuf);
 		}
+		setsid();
 		execvp(((char **)arg->v)[0], (char **)arg->v);
 		fprintf(stderr, "dwm: execvp %s", ((char **)arg->v)[0]);
 		perror(" failed");
