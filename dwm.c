@@ -1675,13 +1675,13 @@ spawn(const Arg *arg) {
 			const char* const home = getenv("HOME");
 			assert(home && strchr(home, '/'));
 			const size_t homelen = strlen(home);
-			char *cwd, *tokbuf, *pathbuf = NULL;
+			char *cwd, *pathbuf = NULL;
 			struct stat statbuf;
 
-			if(!(tokbuf = malloc(strlen(selmon->sel->name) + 1)))
-				die("fatal: could not malloc() %u bytes\n", strlen(selmon->sel->name) + 1);
-
-			cwd = strtok(strcpy(tokbuf, selmon->sel->name), SPAWN_CWD_DELIM);
+			cwd = strtok(selmon->sel->name, SPAWN_CWD_DELIM);
+			/* NOTE: strtok() alters selmon->sel->name in-place,
+			 * but that does not matter because we are going to
+			 * exec() below anyway; nothing else will use it */
 			while(cwd) {
 				if(*cwd == '~') { /* replace ~ with $HOME */
 					if(!(pathbuf = malloc(homelen + strlen(cwd)))) /* ~ counts for NULL term */
@@ -1701,7 +1701,6 @@ spawn(const Arg *arg) {
 				cwd = strtok(NULL, SPAWN_CWD_DELIM);
 			}
 
-			free(tokbuf);
 			free(pathbuf);
 		}
 		setsid();
