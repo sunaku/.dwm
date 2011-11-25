@@ -20,6 +20,7 @@
  *
  * To understand everything else, start reading main().
  */
+#include <assert.h>
 #include <errno.h>
 #include <locale.h>
 #include <stdarg.h>
@@ -1672,6 +1673,7 @@ spawn(const Arg *arg) {
 			close(ConnectionNumber(dpy));
 		if(selmon->sel) {
 			const char* const home = getenv("HOME");
+			assert(home && strchr(home, '/'));
 			const size_t homelen = strlen(home);
 			char *cwd, *tokbuf, *pathbuf = NULL;
 			struct stat statbuf;
